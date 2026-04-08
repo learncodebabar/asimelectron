@@ -101,3 +101,89 @@ export const deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+
+// controllers/productController.js - Add this function
+
+// UPDATE PRODUCT STOCK
+export const updateProductStock = async (req, res) => {
+  try {
+    const { productId, measurement, quantity, operation } = req.body;
+    // operation: "add" or "subtract"
+    
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+    
+    // Find the packing info for this measurement
+    const packingIndex = product.packingInfo.findIndex(p => p.measurement === measurement);
+    if (packingIndex === -1) {
+      return res.status(404).json({ success: false, message: "Packing info not found" });
+    }
+    
+    let newStock = product.packingInfo[packingIndex].openingQty || 0;
+    
+    if (operation === "add") {
+      newStock += quantity;
+    } else if (operation === "subtract") {
+      newStock -= quantity;
+      if (newStock < 0) newStock = 0;
+    }
+    
+    // Update the packing info
+    product.packingInfo[packingIndex].openingQty = newStock;
+    await product.save();
+    
+    res.status(200).json({ 
+      success: true, 
+      message: `Stock updated successfully`, 
+      data: { productId, measurement, newStock } 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// BULK UPDATE PRODUCT STOCK
+export const bulkUpdateProductStock = async (req, res) => {
+  try {
+    const { items, operation } = req.body;
+    // items: array of { productId, measurement, quantity }
+    // operation: "add" or "subtract"
+    
+    const results = [];
+    
+    for (const item of items) {
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        results.push({ ...item, success: false, message: "Product not found" });
+        continue;
+      }
+      
+      const packingIndex = product.packingInfo.findIndex(p => p.measurement === item.measurement);
+      if (packingIndex === -1) {
+        results.push({ ...item, success: false, message: "Packing info not found" });
+        continue;
+      }
+      
+      let newStock = product.packingInfo[packingIndex].openingQty || 0;
+      
+      if (operation === "add") {
+        newStock += item.quantity;
+      } else if (operation === "subtract") {
+        newStock -= item.quantity;
+        if (newStock < 0) newStock = 0;
+      }
+      
+      product.packingInfo[packingIndex].openingQty = newStock;
+      await product.save();
+      
+      results.push({ ...item, success: true, newStock });
+    }
+    
+    res.status(200).json({ success: true, results });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
