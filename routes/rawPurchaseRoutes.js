@@ -1,8 +1,9 @@
+// routes/rawPurchaseRoutes.js
 import express from "express";
 import {
   getNextRawPurchaseInvoice,
   createRawPurchase,
-  getAllSales,
+  getAllRawPurchases,
   getSaleById,
   updateSale,
   deleteSale,
@@ -11,10 +12,7 @@ import {
 const router = express.Router();
 
 router.get("/next-invoice", getNextRawPurchaseInvoice);
-router.get("/", (req, res) => {
-  req.query.saleType = "raw-purchase";
-  getAllSales(req, res);
-});
+router.get("/", getAllRawPurchases);  // Now this function exists
 router.get("/:id", getSaleById);
 router.post("/", createRawPurchase);
 router.put("/:id", updateSale);
