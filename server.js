@@ -42,6 +42,8 @@ app.use("/api/damage", damageRoutes);
 app.use("/api/cpv", cashPaymentRoutes);
 app.use("/api/cash-receipts", cashReceiptRoutes); // MAKE SURE THIS LINE EXISTS
 
+
+
 app.get("/", (req, res) => {
   res.json({ message: "Shop Management API is running" });
 });
