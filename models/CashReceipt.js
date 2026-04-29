@@ -1,10 +1,11 @@
+// backend/models/CashReceipt.js
 import mongoose from "mongoose";
 
 const cashReceiptSchema = new mongoose.Schema(
   {
     receiptNo: {
       type: String,
-      unique: true,
+      unique: true,  // This automatically creates a unique index
       default: () => {
         const date = new Date();
         const year = date.getFullYear();
@@ -63,10 +64,11 @@ const cashReceiptSchema = new mongoose.Schema(
   }
 );
 
-// Index for faster queries
+// Indexes for faster queries
+// REMOVED the duplicate receiptNo index since unique: true already creates it
 cashReceiptSchema.index({ receiptDate: -1 });
 cashReceiptSchema.index({ customerId: 1 });
-cashReceiptSchema.index({ receiptNo: 1 });
+// cashReceiptSchema.index({ receiptNo: 1 }); // ← REMOVE THIS LINE - it's duplicate!
 
 const CashReceipt = mongoose.model("CashReceipt", cashReceiptSchema);
 export default CashReceipt;
