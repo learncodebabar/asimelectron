@@ -1,15 +1,36 @@
-// routes/userRoutes.js
+// routes/userRoutes.js - SIMPLE WORKING VERSION
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get all users (admin only)
-router.get('/', authenticateToken, async (req, res) => {
+// Middleware to verify token
+const verifyToken = async (req, res, next) => {
   try {
-    // Check if user is admin
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(401).json({ message: 'Invalid token' });
+  }
+};
+
+// Get all users (admin only)
+router.get('/', verifyToken, async (req, res) => {
+  try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Access denied. Admin only.' });
     }
@@ -17,43 +38,20 @@ router.get('/', authenticateToken, async (req, res) => {
     const users = await User.find({}).select('-password');
     res.json(users);
   } catch (error) {
-    console.error('Error fetching users:', error);
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Get single user
-router.get('/:id', authenticateToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id).select('-password');
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    // Check if user is requesting their own data or is admin
-    if (req.user.id !== req.params.id && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-    
-    res.json(user);
-  } catch (error) {
-    console.error('Error fetching user:', error);
     res.status(500).json({ message: error.message });
   }
 });
 
 // Create new user (admin only)
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
-    // Check if user is admin
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Access denied. Admin only.' });
     }
     
-    const { username, password, name, role, permissions } = req.body;
+    const { username, password, name, role, permissions, email } = req.body;
     
-    // Check if user already exists
+    // Check if user exists
     const existingUser = await User.findOne({ username });
     if (existingUser) {
       return res.status(400).json({ message: 'Username already exists' });
@@ -67,71 +65,73 @@ router.post('/', authenticateToken, async (req, res) => {
       username,
       password: hashedPassword,
       name: name || '',
+      email: email || '',
       role: role || 'user',
       permissions: permissions || []
     });
     
     await user.save();
     
-    // Return user without password
-    const userResponse = user.toObject();
-    delete userResponse.password;
-    
-    res.status(201).json(userResponse);
+    res.status(201).json({
+      id: user._id,
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions
+    });
   } catch (error) {
-    console.error('Error creating user:', error);
+    console.error('Create user error:', error);
     res.status(500).json({ message: error.message });
   }
 });
 
 // Update user
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, role, permissions, password } = req.body;
+    const { name, role, permissions, password, email } = req.body;
     
-    // Find the user
     const user = await User.findById(id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
     
-    // Check permissions (only admin can update other users, users can update themselves)
+    // Check permissions
     if (req.user.role !== 'admin' && req.user.id !== id) {
       return res.status(403).json({ message: 'Access denied' });
     }
     
-    // Only admins can change roles and permissions
-    if ((role || permissions) && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only admins can change roles and permissions' });
-    }
+    // Update fields
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email;
     
-    // Prepare update data
-    const updateData = {
-      name: name !== undefined ? name : user.name,
-      updatedAt: Date.now()
-    };
-    
-    // Only update role and permissions if admin
     if (req.user.role === 'admin') {
-      if (role !== undefined) updateData.role = role;
-      if (permissions !== undefined) updateData.permissions = permissions;
+      if (role !== undefined) user.role = role;
+      if (permissions !== undefined) {
+        user.permissions = permissions;
+        console.log('Updated permissions for user:', user.username, permissions);
+      }
     }
     
-    // Hash password if provided
-    if (password) {
+    if (password && password.trim() !== '') {
       const salt = await bcrypt.genSalt(10);
-      updateData.password = await bcrypt.hash(password, salt);
+      user.password = await bcrypt.hash(password, salt);
     }
     
-    // Update user
-    const updatedUser = await User.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: false }
-    ).select('-password');
+    user.updatedAt = Date.now();
+    await user.save();
     
-    res.json(updatedUser);
+    res.json({
+      id: user._id,
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions
+    });
   } catch (error) {
     console.error('Update user error:', error);
     res.status(500).json({ message: error.message });
@@ -139,29 +139,19 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete user (admin only)
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    // Check if user is admin
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Access denied. Admin only.' });
     }
     
-    const { id } = req.params;
-    
-    // Prevent admin from deleting themselves
-    if (req.user.id === id) {
-      return res.status(400).json({ message: 'You cannot delete your own account' });
+    if (req.user.id === req.params.id) {
+      return res.status(400).json({ message: 'Cannot delete yourself' });
     }
     
-    const user = await User.findByIdAndDelete(id);
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
+    await User.findByIdAndDelete(req.params.id);
     res.json({ message: 'User deleted successfully' });
   } catch (error) {
-    console.error('Error deleting user:', error);
     res.status(500).json({ message: error.message });
   }
 });

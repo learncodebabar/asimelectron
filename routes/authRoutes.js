@@ -1,15 +1,15 @@
-// backend/routes/authRoutes.js
+// routes/authRoutes.js - SIMPLE WORKING VERSION
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
-import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 // Generate JWT Token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || '7d'
+    expiresIn: '7d'
   });
 };
 
@@ -24,59 +24,72 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Please provide username and password' });
     }
     
-    const user = await User.findOne({ username: username.toLowerCase() });
+    const user = await User.findOne({ username: username });
     
     if (!user) {
       return res.status(401).json({ message: 'Invalid username or password' });
     }
     
-    if (!user.isActive) {
-      return res.status(401).json({ message: 'Account is deactivated' });
-    }
+    // Compare password
+    const isMatch = await bcrypt.compare(password, user.password);
     
-    const isPasswordValid = await user.comparePassword(password);
-    
-    if (!isPasswordValid) {
+    if (!isMatch) {
       return res.status(401).json({ message: 'Invalid username or password' });
     }
     
     const token = generateToken(user._id);
     
-    const userResponse = {
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        _id: user._id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        permissions: user.permissions || []
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// @route   GET /api/auth/me
+router.get('/me', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ message: 'No token' });
+    }
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id).select('-password');
+    
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    
+    res.json({
       id: user._id,
+      _id: user._id,
       username: user.username,
       name: user.name,
       email: user.email,
       role: user.role,
       permissions: user.permissions || []
-    };
-    
-    console.log('Login successful:', username);
-    
-    res.json({
-      success: true,
-      token,
-      user: userResponse
     });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// @route   GET /api/auth/me
-router.get('/me', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password');
-    res.json(user);
-  } catch (error) {
     console.error('Get me error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(401).json({ message: 'Invalid token' });
   }
 });
 
 // @route   POST /api/auth/logout
-router.post('/logout', protect, (req, res) => {
+router.post('/logout', (req, res) => {
   res.json({ message: 'Logged out successfully' });
 });
 

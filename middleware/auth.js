@@ -25,6 +25,7 @@ export const authenticateToken = async (req, res, next) => {
     // Attach user to request object
     req.user = {
       id: user._id.toString(),
+      _id: user._id,
       username: user.username,
       role: user.role,
       permissions: user.permissions
@@ -45,6 +46,9 @@ export const authenticateToken = async (req, res, next) => {
     res.status(500).json({ message: 'Authentication failed' });
   }
 };
+
+// Add alias for protect to maintain compatibility
+export const protect = authenticateToken;
 
 // Optional: Middleware for admin-only routes
 export const requireAdmin = (req, res, next) => {

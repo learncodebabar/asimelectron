@@ -1,6 +1,5 @@
-// models/User.js
+// models/User.js - SUPER SIMPLE WORKING VERSION
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
 
 const userSchema = new mongoose.Schema({
   username: {
@@ -17,14 +16,23 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  email: {
+    type: String,
+    default: ''
+  },
   role: {
     type: String,
     enum: ['user', 'admin'],
     default: 'user'
   },
-  permissions: [{
-    type: String
-  }],
+  permissions: {
+    type: [String],
+    default: []
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -35,33 +43,8 @@ const userSchema = new mongoose.Schema({
   }
 });
 
-// Hash password before saving - Standard version
-userSchema.pre('save', function(next) {
-  const user = this;
-  
-  // Only hash if password is modified
-  if (!user.isModified('password')) return next();
-  
-  // Generate salt and hash
-  bcrypt.genSalt(10, (err, salt) => {
-    if (err) return next(err);
-    
-    bcrypt.hash(user.password, salt, (err, hash) => {
-      if (err) return next(err);
-      user.password = hash;
-      user.updatedAt = Date.now();
-      next();
-    });
-  });
-});
-
-// Compare password method
-userSchema.methods.comparePassword = function(candidatePassword, callback) {
-  bcrypt.compare(candidatePassword, this.password, (err, isMatch) => {
-    if (err) return callback(err);
-    callback(null, isMatch);
-  });
-};
+// NO PRE-SAVE HOOK - We'll handle hashing manually in routes
+// This avoids all the next() errors
 
 const User = mongoose.model('User', userSchema);
 

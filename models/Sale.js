@@ -1,4 +1,4 @@
-// models/Sale.js
+// models/Sale.js - ADD USER AND COUNTER TRACKING
 import mongoose from "mongoose";
 
 const saleItemSchema = new mongoose.Schema({
@@ -55,8 +55,34 @@ const saleSchema = new mongoose.Schema(
     sendSms: { type: Boolean, default: false },
     remarks: { type: String, default: "" },
     status: { type: String, default: "Active", enum: ["Active", "Cancelled"] },
+    
+    // ========== NEW FIELDS FOR USER & COUNTER TRACKING ==========
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true
+    },
+    username: {
+      type: String,
+      required: true
+    },
+    counterId: {
+      type: String,
+      default: "default"
+    },
+    counterName: {
+      type: String,
+      default: "Main Counter"
+    },
+    // ============================================================
   },
-  { timestamps: true },
+  { timestamps: true }
 );
+
+// Create indexes for faster reporting
+saleSchema.index({ userId: 1, invoiceDate: -1 });
+saleSchema.index({ counterId: 1, invoiceDate: -1 });
+saleSchema.index({ username: 1 });
+saleSchema.index({ createdAt: -1 });
 
 export default mongoose.model("Sale", saleSchema);
