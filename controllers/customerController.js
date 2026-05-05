@@ -234,13 +234,16 @@ export const getSupplierPayables = async (req, res) => {
   }
 };
 
-// ── UPDATE CUSTOMER BALANCE ───────────────────────────────────────────────────
+// controllers/customerController.js - Add this function if not exists
+// controllers/customerController.js - Add this function at the end of the file
+
+// ── UPDATE CUSTOMER BALANCE FOR CASH RECEIPTS ───────────────────────────────
 export const updateCustomerBalance = async (req, res) => {
   try {
     const { id } = req.params;
     const { amount, operation } = req.body;
     
-    console.log("========== BALANCE UPDATE API ==========");
+    console.log("========== BALANCE UPDATE API CALLED ==========");
     console.log("Customer ID:", id);
     console.log("Amount:", amount);
     console.log("Operation:", operation);
@@ -253,7 +256,9 @@ export const updateCustomerBalance = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid operation" });
     }
     
+    const Customer = await import("../models/Customer.js").then(m => m.default);
     const customer = await Customer.findById(id);
+    
     if (!customer) {
       return res.status(404).json({ success: false, message: "Customer not found" });
     }
@@ -264,14 +269,15 @@ export const updateCustomerBalance = async (req, res) => {
     customer.currentBalance = newBalance;
     await customer.save();
     
-    console.log(`✅ Balance: ${oldBalance} -> ${newBalance}`);
+    console.log(`✅ Balance updated: ${oldBalance} -> ${newBalance}`);
     
     res.json({ 
       success: true, 
       data: { 
         currentBalance: newBalance,
         oldBalance: oldBalance,
-        deducted: amount
+        amount: amount,
+        operation: operation
       }
     });
   } catch (error) {

@@ -10,7 +10,7 @@ import {
   getPurchaseHistory,
   getSuppliers,
   getSupplierPayables,
-  updateCustomerBalance,
+  updateCustomerBalance,  // Make sure this is imported
 } from "../controllers/customerController.js";
 
 const router = express.Router();
@@ -22,7 +22,7 @@ router.post("/", create);
 router.put("/:id", update);
 router.delete("/:id", remove);
 
-// ✅ Balance update endpoint
+// ✅ Balance update endpoint - THIS IS CRITICAL
 router.patch("/:id/balance", updateCustomerBalance);
 
 // History routes
