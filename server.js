@@ -60,7 +60,7 @@ app.use("/api/sale-returns", saleReturnRoutes);
 
 
 app.get("/", (req, res) => {
-  res.json({ message: "Shop Management API is running" });
+  res.json({ message: "Shop Management API is running Perfectly" });
 });
 
 app.get("/api/test", (req, res) => {
