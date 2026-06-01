@@ -1,114 +1,124 @@
-// controllers/saleController.js
+// controllers/saleController.js - COMPLETE FIXED WITH STOCK MANAGEMENT
+
 import Sale from "../models/Sale.js";
 import Customer from "../models/Customer.js";
+import Product from "../models/Product.js"; // IMPORTANT: Must import Product model
 
-// ── HELPER: next INV number for regular sale ──────────────────────────────
-const getNextInvNum = async () => {
-  const last = await Sale.findOne(
-    { saleType: "sale" },
-    { invoiceNo: 1 },
-    { sort: { createdAt: -1 } }
-  ).lean();
-
-  let num = 1;
-  if (last?.invoiceNo) {
-    const n = parseInt(last.invoiceNo.replace("INV-", ""), 10);
-    if (!isNaN(n) && n > 0) num = n + 1;
-  }
-
-  while (await Sale.exists({ invoiceNo: `INV-${String(num).padStart(5, "0")}` })) {
-    num++;
-  }
-  return num;
+/* ═══════════════════════════════════════════════════════════════════════════
+   HELPER: Get current year-month code (YYMM) - Same as Frontend
+═══════════════════════════════════════════════════════════════════════════ */
+const getCurrentYearMonthCode = () => {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(-2);
+  const month = (now.getMonth() + 1).toString().padStart(2, '0');
+  return `${year}${month}`;
 };
 
-// ── HELPER: next PUR number for regular purchase ──────────────────────────
-const getNextPurNum = async () => {
-  const last = await Sale.findOne(
-    { saleType: "purchase" },
-    { invoiceNo: 1 },
-    { sort: { createdAt: -1 } }
-  ).lean();
-
-  let num = 1;
-  if (last?.invoiceNo) {
-    const n = parseInt(last.invoiceNo.replace("PUR-", ""), 10);
-    if (!isNaN(n) && n > 0) num = n + 1;
-  }
-
-  while (await Sale.exists({ invoiceNo: `PUR-${String(num).padStart(5, "0")}` })) {
-    num++;
-  }
-  return num;
-};
-
-// ── HELPER: next RAW-P number for raw purchase ────────────────────────────
-const getNextRawPurNum = async () => {
-  const last = await Sale.findOne(
-    { saleType: "raw-purchase" },
-    { invoiceNo: 1 },
-    { sort: { createdAt: -1 } }
-  ).lean();
-
-  let num = 1;
-  if (last?.invoiceNo) {
-    const match = last.invoiceNo.match(/RAW-P-(\d+)/);
-    if (match && match[1]) {
-      const n = parseInt(match[1], 10);
-      if (!isNaN(n) && n > 0) num = n + 1;
+/* ═══════════════════════════════════════════════════════════════════════════
+   INVOICE NUMBER GENERATOR - Same as Frontend (YYMM + 4 digit sequence)
+═══════════════════════════════════════════════════════════════════════════ */
+const generateInvoiceNumber = async () => {
+  const currentYearMonth = getCurrentYearMonthCode();
+  let maxSeqForMonth = 0;
+  
+  // Find all sales with current year-month prefix (YYMMxxxx format)
+  const sales = await Sale.find({ 
+    invoiceNo: { $regex: `^${currentYearMonth}`, $options: 'i' } 
+  });
+  
+  for (const sale of sales) {
+    if (sale.invoiceNo && sale.invoiceNo.length === 8 && /^\d+$/.test(sale.invoiceNo)) {
+      const seqNum = parseInt(sale.invoiceNo.slice(-4), 10);
+      if (!isNaN(seqNum) && seqNum > maxSeqForMonth) {
+        maxSeqForMonth = seqNum;
+      }
     }
   }
-
-  while (await Sale.exists({ invoiceNo: `RAW-P-${String(num).padStart(5, "0")}` })) {
-    num++;
-  }
-  return num;
+  
+  const nextSeq = maxSeqForMonth + 1;
+  const formattedSeq = nextSeq.toString().padStart(4, '0');
+  const newInvoiceNo = `${currentYearMonth}${formattedSeq}`;
+  
+  return newInvoiceNo;
 };
 
-// ── HELPER: next RAW-S number for raw sale ────────────────────────────────
-const getNextRawSaleNum = async () => {
-  const last = await Sale.findOne(
-    { saleType: "raw-sale" },
-    { invoiceNo: 1 },
-    { sort: { createdAt: -1 } }
-  ).lean();
+/* ═══════════════════════════════════════════════════════════════════════════
+   STOCK UPDATE HELPERS
+═══════════════════════════════════════════════════════════════════════════ */
 
-  let num = 1;
-  if (last?.invoiceNo) {
-    const match = last.invoiceNo.match(/RAW-S-(\d+)/);
-    if (match && match[1]) {
-      const n = parseInt(match[1], 10);
-      if (!isNaN(n) && n > 0) num = n + 1;
+// Update single product stock
+// Update single product stock
+const updateProductStock = async (productId, uom, qty, isRestore = false) => {
+  try {
+    if (!productId) return false;
+    
+    const product = await Product.findById(productId);
+    if (!product || !product.packingInfo) {
+      console.log(`⚠️ Product not found or no packing info: ${productId}`);
+      return false;
     }
+    
+    const packingIndex = product.packingInfo.findIndex(pk => pk.measurement === uom);
+    if (packingIndex === -1) {
+      console.log(`⚠️ Packing not found for ${uom} in product: ${productId}`);
+      return false;
+    }
+    
+    const currentStock = product.packingInfo[packingIndex].openingQty || 0;
+    
+    // isRestore = true → ADD stock (for returns)
+    // isRestore = false → DEDUCT stock (for sales)
+    let newStock;
+    if (isRestore) {
+      newStock = currentStock + qty;  // ADD back to stock
+      console.log(`📦 RETURN: Adding ${qty} ${uom} to stock for ${product.code}`);
+    } else {
+      newStock = Math.max(0, currentStock - qty);  // DEDUCT from stock
+      console.log(`📦 SALE: Deducting ${qty} ${uom} from stock for ${product.code}`);
+    }
+    
+    product.packingInfo[packingIndex].openingQty = newStock;
+    await product.save();
+    
+    console.log(`📦 Stock updated: ${product.code} - ${uom}: ${currentStock} → ${newStock}`);
+    return true;
+  } catch (error) {
+    console.error("Failed to update stock:", error);
+    return false;
   }
-
-  while (await Sale.exists({ invoiceNo: `RAW-S-${String(num).padStart(5, "0")}` })) {
-    num++;
+};
+// Restore all items stock from a sale (for delete or edit)
+const restoreSaleStock = async (sale) => {
+  if (!sale.items || sale.items.length === 0) return;
+  
+  console.log(`🔄 Restoring stock for sale: ${sale.invoiceNo}`);
+  for (const item of sale.items) {
+    const uom = item.measurement || item.uom;
+    const qty = item.qty || item.pcs;
+    await updateProductStock(item.productId, uom, qty, true);
   }
-  return num;
+  console.log(`✅ Stock restored for sale: ${sale.invoiceNo}`);
 };
 
-// ── HELPER: next RTN number for return ────────────────────────────────────
-const getNextRtnNum = async () => {
-  const last = await Sale.findOne(
-    { saleType: "return" },
-    { invoiceNo: 1 },
-    { sort: { createdAt: -1 } }
-  ).lean();
-
-  let num = 1;
-  if (last?.invoiceNo) {
-    const n = parseInt(last.invoiceNo.replace("RTN-", ""), 10);
-    if (!isNaN(n) && n > 0) num = n + 1;
+// Deduct all items stock for a sale (for new sale)
+// Deduct all items stock for a sale (for new sale)
+const deductSaleStock = async (sale) => {
+  if (!sale.items || sale.items.length === 0) return;
+  
+  console.log(`📉 Deducting stock for sale: ${sale.invoiceNo}`);
+  for (const item of sale.items) {
+    const uom = item.measurement || item.uom;
+    const qty = item.qty || item.pcs;
+    // Make sure we're deducting the correct quantity
+    console.log(`  - Deducting ${qty} ${uom} from product ${item.productId}`);
+    await updateProductStock(item.productId, uom, qty, false);
   }
-
-  while (await Sale.exists({ invoiceNo: `RTN-${String(num).padStart(5, "0")}` })) {
-    num++;
-  }
-  return num;
+  console.log(`✅ Stock deducted for sale: ${sale.invoiceNo}`);
 };
 
-// ── GET all sales — full filter support ───────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   GET all sales — full filter support
+═══════════════════════════════════════════════════════════════════════════ */
 export const getAllSales = async (req, res) => {
   try {
     const {
@@ -155,8 +165,9 @@ export const getAllSales = async (req, res) => {
   }
 };
 
-// ── GET all raw purchases only ────────────────────────────────────────────
-// ── GET all raw purchases only ────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   GET all raw purchases only
+═══════════════════════════════════════════════════════════════════════════ */
 export const getAllRawPurchases = async (req, res) => {
   try {
     const {
@@ -198,7 +209,10 @@ export const getAllRawPurchases = async (req, res) => {
     res.status(500).json({ success: false, message: e.message });
   }
 };
-// ── GET summary stats ─────────────────────────────────────────────────────
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GET summary stats
+═══════════════════════════════════════════════════════════════════════════ */
 export const getSaleSummary = async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
@@ -256,7 +270,9 @@ export const getSaleSummary = async (req, res) => {
   }
 };
 
-// ── GET single sale ───────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   GET single sale
+═══════════════════════════════════════════════════════════════════════════ */
 export const getSaleById = async (req, res) => {
   try {
     const sale = await Sale.findById(req.params.id).populate(
@@ -271,76 +287,60 @@ export const getSaleById = async (req, res) => {
   }
 };
 
-// ── GET next invoice number for regular sale ──────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   GET next invoice numbers (YYMMXXXX format)
+═══════════════════════════════════════════════════════════════════════════ */
 export const getNextInvoice = async (req, res) => {
   try {
-    const num = await getNextInvNum();
-    res.json({
-      success: true,
-      data: { invoiceNo: `INV-${String(num).padStart(5, "0")}` },
-    });
+    const invoiceNo = await generateInvoiceNumber();
+    res.json({ success: true, data: { invoiceNo } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// ── GET next purchase invoice number ──────────────────────────────────────
 export const getNextPurchaseInvoice = async (req, res) => {
   try {
-    const num = await getNextPurNum();
-    res.json({
-      success: true,
-      data: { invoiceNo: `PUR-${String(num).padStart(5, "0")}` },
-    });
+    const invoiceNo = await generateInvoiceNumber();
+    res.json({ success: true, data: { invoiceNo } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// ── GET next raw purchase invoice number ──────────────────────────────────
 export const getNextRawPurchaseInvoice = async (req, res) => {
   try {
-    const num = await getNextRawPurNum();
-    res.json({
-      success: true,
-      data: { invoiceNo: `RAW-P-${String(num).padStart(5, "0")}` },
-    });
+    const invoiceNo = await generateInvoiceNumber();
+    res.json({ success: true, data: { invoiceNo } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// ── GET next raw sale invoice number ──────────────────────────────────────
 export const getNextRawSaleInvoice = async (req, res) => {
   try {
-    const num = await getNextRawSaleNum();
-    res.json({
-      success: true,
-      data: { invoiceNo: `RAW-S-${String(num).padStart(5, "0")}` },
-    });
+    const invoiceNo = await generateInvoiceNumber();
+    res.json({ success: true, data: { invoiceNo } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// ── GET next return number ────────────────────────────────────────────────
 export const getNextReturnNo = async (req, res) => {
   try {
-    const num = await getNextRtnNum();
-    res.json({
-      success: true,
-      data: { returnNo: `RTN-${String(num).padStart(5, "0")}` },
-    });
+    const invoiceNo = await generateInvoiceNumber();
+    res.json({ success: true, data: { returnNo: invoiceNo } });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
   }
 };
 
-// ── CREATE regular sale ───────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   CREATE regular sale (with STOCK DEDUCTION)
+═══════════════════════════════════════════════════════════════════════════ */
 export const createSale = async (req, res) => {
   try {
-    const num = await getNextInvNum();
-    const invoiceNo = `INV-${String(num).padStart(5, "0")}`;
+    const invoiceNo = await generateInvoiceNumber();
 
     const body = {
       ...req.body,
@@ -353,6 +353,9 @@ export const createSale = async (req, res) => {
 
     const sale = await Sale.create(body);
     
+    // DEDUCT stock for regular sale
+    await deductSaleStock(sale);
+    
     if (sale.customerId && sale.balance > 0) {
       await Customer.findByIdAndUpdate(sale.customerId, {
         $inc: { currentBalance: sale.balance }
@@ -361,15 +364,17 @@ export const createSale = async (req, res) => {
 
     res.status(201).json({ success: true, data: sale });
   } catch (e) {
+    console.error("Create sale error:", e);
     res.status(400).json({ success: false, message: e.message });
   }
 };
 
-// ── CREATE regular purchase ───────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   CREATE regular purchase (with STOCK ADDITION)
+═══════════════════════════════════════════════════════════════════════════ */
 export const createPurchase = async (req, res) => {
   try {
-    const num = await getNextPurNum();
-    const invoiceNo = `PUR-${String(num).padStart(5, "0")}`;
+    const invoiceNo = await generateInvoiceNumber();
 
     const body = {
       ...req.body,
@@ -382,6 +387,11 @@ export const createPurchase = async (req, res) => {
 
     const sale = await Sale.create(body);
     
+    // ADD stock for purchase (isRestore = true means add)
+    for (const item of sale.items) {
+      await updateProductStock(item.productId, item.measurement || item.uom, item.qty || item.pcs, true);
+    }
+    
     if (sale.customerId && sale.balance > 0) {
       await Customer.findByIdAndUpdate(sale.customerId, {
         $inc: { currentBalance: sale.balance }
@@ -390,20 +400,20 @@ export const createPurchase = async (req, res) => {
 
     res.status(201).json({ success: true, data: sale });
   } catch (e) {
+    console.error("Create purchase error:", e);
     res.status(400).json({ success: false, message: e.message });
   }
 };
 
-// controllers/saleController.js
-// In saleController.js, update the createRawPurchase function
+/* ═══════════════════════════════════════════════════════════════════════════
+   CREATE raw purchase (with STOCK ADDITION)
+═══════════════════════════════════════════════════════════════════════════ */
 export const createRawPurchase = async (req, res) => {
   try {
-    const num = await getNextRawPurNum();
-    const invoiceNo = `RAW-P-${String(num).padStart(5, "0")}`;
+    const invoiceNo = await generateInvoiceNumber();
 
     console.log("========== CREATING RAW PURCHASE ==========");
-    console.log("Customer ID from request:", req.body.customerId);
-    console.log("Paid Amount:", req.body.paidAmount);
+    console.log("Invoice No:", invoiceNo);
 
     const body = {
       ...req.body,
@@ -414,19 +424,18 @@ export const createRawPurchase = async (req, res) => {
       saleType: "raw-purchase",
     };
 
-    // Create the sale
     const sale = await Sale.create(body);
     console.log("✅ Sale created:", sale.invoiceNo);
+    
+    // ADD stock for raw purchase
+    for (const item of sale.items) {
+      await updateProductStock(item.productId, item.measurement || item.uom, item.qty || item.pcs, true);
+    }
 
-    // ✅ CHECK AND CREATE CUSTOMER IF MISSING
     if (sale.customerId) {
       let customer = await Customer.findById(sale.customerId);
       
-      // If customer doesn't exist, create it automatically
-      if (!customer) {
-        console.log(`⚠️ Customer not found, creating new customer...`);
-        
-        // Generate a simple code
+      if (!customer && sale.customerName !== "COUNTER SALE") {
         const lastCustomer = await Customer.findOne({}, {}, { sort: { createdAt: -1 } });
         let nextCode = 1;
         if (lastCustomer?.code) {
@@ -434,7 +443,7 @@ export const createRawPurchase = async (req, res) => {
         }
         
         customer = new Customer({
-          _id: sale.customerId, // Use the same ID from the sale
+          _id: sale.customerId,
           name: sale.customerName,
           code: String(nextCode),
           type: "credit",
@@ -445,25 +454,16 @@ export const createRawPurchase = async (req, res) => {
         });
         
         await customer.save();
-        console.log(`✅ Auto-created customer: ${customer.name} with ID: ${customer._id}`);
+        console.log(`✅ Auto-created customer: ${customer.name}`);
       }
       
-      // Update balance
-      if (sale.paidAmount > 0) {
+      if (customer && sale.paidAmount > 0) {
         const oldBalance = customer.currentBalance || 0;
         const newBalance = oldBalance - sale.paidAmount;
-        
-        console.log(`Customer: ${customer.name}`);
-        console.log(`Old balance: ${oldBalance}`);
-        console.log(`Amount to deduct: ${sale.paidAmount}`);
-        console.log(`New balance: ${newBalance}`);
         
         customer.currentBalance = newBalance;
         await customer.save();
         
-        console.log(`✅ BALANCE UPDATED SUCCESSFULLY!`);
-        
-        // Update the sale document with actual previous balance
         sale.prevBalance = oldBalance;
         sale.balance = newBalance;
         await sale.save();
@@ -478,11 +478,13 @@ export const createRawPurchase = async (req, res) => {
     res.status(400).json({ success: false, message: e.message });
   }
 };
-// ── CREATE raw sale (customer receives raw material) ──────────────────────
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CREATE raw sale (with STOCK DEDUCTION)
+═══════════════════════════════════════════════════════════════════════════ */
 export const createRawSale = async (req, res) => {
   try {
-    const num = await getNextRawSaleNum();
-    const invoiceNo = `RAW-S-${String(num).padStart(5, "0")}`;
+    const invoiceNo = await generateInvoiceNumber();
 
     const body = {
       ...req.body,
@@ -495,6 +497,9 @@ export const createRawSale = async (req, res) => {
 
     const sale = await Sale.create(body);
     
+    // DEDUCT stock for raw sale
+    await deductSaleStock(sale);
+    
     if (sale.customerId && sale.balance > 0) {
       await Customer.findByIdAndUpdate(sale.customerId, {
         $inc: { currentBalance: sale.balance }
@@ -503,25 +508,36 @@ export const createRawSale = async (req, res) => {
 
     res.status(201).json({ success: true, data: sale });
   } catch (e) {
+    console.error("Create raw sale error:", e);
     res.status(400).json({ success: false, message: e.message });
   }
 };
 
-// ── CREATE sale return ────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   CREATE sale return (with STOCK ADDITION)
+═══════════════════════════════════════════════════════════════════════════ */
+// ✅ CORRECT - This ADDS stock back
+
+// In saleController.js
 export const createSaleReturn = async (req, res) => {
   try {
-    const num = await getNextRtnNum();
-    const returnNo = `RTN-${String(num).padStart(5, "0")}`;
+    const invoiceNo = await generateInvoiceNumber();
 
     const body = {
       ...req.body,
-      invoiceNo: returnNo,
-      returnNo,
-      invoiceDate: req.body.returnDate,
+      invoiceNo,
+      invoiceDate: req.body.returnDate || req.body.invoiceDate,
       saleType: "return",
     };
 
     const sale = await Sale.create(body);
+    
+    // ADD stock back for return (isRestore = true)
+    for (const item of sale.items) {
+      const uom = item.measurement || item.uom;
+      const qty = item.qty || item.pcs;
+      await updateProductStock(item.productId, uom, qty, true); // true = add stock
+    }
     
     if (sale.customerId && sale.paidAmount > 0) {
       await Customer.findByIdAndUpdate(sale.customerId, {
@@ -531,11 +547,14 @@ export const createSaleReturn = async (req, res) => {
 
     res.status(201).json({ success: true, data: sale });
   } catch (e) {
+    console.error("Create return error:", e);
     res.status(400).json({ success: false, message: e.message });
   }
 };
 
-// ── UPDATE sale (handles all types) ───────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   UPDATE sale (handles stock correctly)
+═══════════════════════════════════════════════════════════════════════════ */
 export const updateSale = async (req, res) => {
   try {
     const oldSale = await Sale.findById(req.params.id);
@@ -544,7 +563,11 @@ export const updateSale = async (req, res) => {
 
     const { invoiceNo, returnNo, saleType, ...updateData } = req.body;
 
-    // Reverse old balance change
+    // STEP 1: Restore old stock
+    await restoreSaleStock(oldSale);
+    console.log(`✅ Old stock restored for sale: ${oldSale.invoiceNo}`);
+
+    // STEP 2: Reverse old balance change
     if (oldSale.customerId) {
       if (oldSale.saleType === "raw-purchase") {
         if (oldSale.paidAmount > 0) {
@@ -571,12 +594,17 @@ export const updateSale = async (req, res) => {
       }
     }
 
+    // STEP 3: Update sale record
     const sale = await Sale.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
     });
 
-    // Apply new balance change
+    // STEP 4: Deduct new stock
+    await deductSaleStock(sale);
+    console.log(`✅ New stock deducted for sale: ${sale.invoiceNo}`);
+
+    // STEP 5: Apply new balance change
     if (sale.customerId) {
       if (sale.saleType === "raw-purchase") {
         if (sale.paidAmount > 0) {
@@ -605,18 +633,25 @@ export const updateSale = async (req, res) => {
 
     res.json({ success: true, data: sale });
   } catch (e) {
+    console.error("Update sale error:", e);
     res.status(400).json({ success: false, message: e.message });
   }
 };
 
-// ── DELETE sale (handles all types) ───────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
+   DELETE sale (restores stock)
+═══════════════════════════════════════════════════════════════════════════ */
 export const deleteSale = async (req, res) => {
   try {
     const sale = await Sale.findById(req.params.id);
     if (!sale)
       return res.status(404).json({ success: false, message: "Not found" });
     
-    // Reverse the balance change before deleting
+    // STEP 1: Restore stock
+    await restoreSaleStock(sale);
+    console.log(`✅ Stock restored before deleting sale: ${sale.invoiceNo}`);
+    
+    // STEP 2: Reverse the balance change before deleting
     if (sale.customerId) {
       if (sale.saleType === "raw-purchase") {
         if (sale.paidAmount > 0) {
@@ -643,9 +678,13 @@ export const deleteSale = async (req, res) => {
       }
     }
     
+    // STEP 3: Delete sale
     await Sale.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: "Deleted" });
+    console.log(`✅ Sale deleted: ${sale.invoiceNo}`);
+    
+    res.json({ success: true, message: "Sale deleted and stock restored" });
   } catch (e) {
+    console.error("Delete sale error:", e);
     res.status(500).json({ success: false, message: e.message });
   }
 };

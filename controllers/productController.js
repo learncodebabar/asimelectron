@@ -3,10 +3,10 @@ import Product from "../models/Product.js";
 async function generateProductId() {
   const count = await Product.countDocuments();
   let num = count + 1;
-  let id = String(num).padStart(4, "0");
+  let id = String(num);  // No padding - returns "1", "2", "3", etc.
   while (await Product.findOne({ productId: id })) {
     num++;
-    id = String(num).padStart(4, "0");
+    id = String(num);
   }
   return id;
 }
@@ -183,6 +183,31 @@ export const bulkUpdateProductStock = async (req, res) => {
     }
     
     res.status(200).json({ success: true, results });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// GET /products/stock-report
+export const getStockReport = async (req, res) => {
+  try {
+    const products = await Product.find();
+    
+    const stockReport = products.map(product => ({
+      productId: product.productId,
+      code: product.code,
+      description: product.description,
+      company: product.company,
+      packingInfo: product.packingInfo.map(pk => ({
+        measurement: pk.measurement,
+        currentStock: pk.openingQty || 0,
+        minQty: pk.minQty || 0,
+        reorderQty: pk.reorderQty || 0,
+        status: (pk.openingQty || 0) <= (pk.minQty || 0) ? "LOW STOCK" : "OK"
+      }))
+    }));
+    
+    res.json({ success: true, data: stockReport });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

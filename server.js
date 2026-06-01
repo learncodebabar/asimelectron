@@ -21,6 +21,8 @@ import cashReceiptRoutes from "./routes/cashReceiptRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import User from "./models/User.js";
+import saleReturnRoutes from "./routes/saleReturnRoutes.js";
+import purchaseReturnRoutes from "./routes/purchaseReturnRoutes.js";
 
 dotenv.config();
 
@@ -53,6 +55,9 @@ app.use("/api/quotations", quotationRoutes);
 app.use("/api/damage", damageRoutes);
 app.use("/api/cpv", cashPaymentRoutes);
 app.use("/api/cash-receipts", cashReceiptRoutes);
+app.use("/api/purchase-returns", purchaseReturnRoutes);
+app.use("/api/sale-returns", saleReturnRoutes);
+
 
 app.get("/", (req, res) => {
   res.json({ message: "Shop Management API is running" });

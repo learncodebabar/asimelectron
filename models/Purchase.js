@@ -12,8 +12,13 @@ const purchaseItemSchema = new mongoose.Schema({
 const purchaseSchema = new mongoose.Schema(
   {
     purchaseNo: { type: String, unique: true },
-    supplierId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true },
-    supplierName: { type: String, required: true },
+    supplierId: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "Customer", 
+      required: false,  // ← CHANGE: Make it optional for cash purchases
+      default: null 
+    },
+    supplierName: { type: String, required: true },  // Always required (can be "Cash Purchase")
     purchaseDate: { type: String, required: true },
     items: [purchaseItemSchema],
     subtotal: { type: Number, required: true },
@@ -24,14 +29,20 @@ const purchaseSchema = new mongoose.Schema(
     paymentStatus: {
       type: String,
       enum: ["Paid", "Partial", "Unpaid"],
-      default: "Unpaid",
+      default: "Paid",
     },
     notes: { type: String, default: "" },
+    // Add these optional fields for invoice tracking
+    invoiceNo: { type: String, unique: true },
+    invoiceDate: { type: String },
+    username: { type: String, default: "admin" },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    remarks: { type: String, default: "" },
   },
   { timestamps: true }
 );
 
-// Auto-generate purchase number
+// Auto-generate purchase number if not provided
 purchaseSchema.pre("save", async function () {
   if (!this.purchaseNo) {
     const last = await mongoose

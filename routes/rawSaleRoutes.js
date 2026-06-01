@@ -1,23 +1,20 @@
 import express from "express";
 import {
+  getAllRawSales,
+  getRawSaleById,
   getNextRawSaleInvoice,
   createRawSale,
-  getAllSales,
-  getSaleById,
-  updateSale,
-  deleteSale,
-} from "../controllers/saleController.js";
+  updateRawSale,
+  deleteRawSale,
+} from "../controllers/rawSaleController.js";
 
 const router = express.Router();
 
 router.get("/next-invoice", getNextRawSaleInvoice);
-router.get("/", (req, res) => {
-  req.query.saleType = "raw-sale";
-  getAllSales(req, res);
-});
-router.get("/:id", getSaleById);
+router.get("/", getAllRawSales);
+router.get("/:id", getRawSaleById);
 router.post("/", createRawSale);
-router.put("/:id", updateSale);
-router.delete("/:id", deleteSale);
+router.put("/:id", updateRawSale);
+router.delete("/:id", deleteRawSale);
 
 export default router;

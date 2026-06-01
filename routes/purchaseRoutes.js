@@ -1,23 +1,21 @@
+// routes/purchaseRoutes.js
 import express from "express";
 import {
+  getAllPurchases,
+  getPurchaseById,
   getNextPurchaseInvoice,
   createPurchase,
-  getAllSales,
-  getSaleById,
-  updateSale,
-  deleteSale,
-} from "../controllers/saleController.js";
+  updatePurchase,
+  deletePurchase,
+} from "../controllers/purchaseController.js";
 
 const router = express.Router();
 
 router.get("/next-invoice", getNextPurchaseInvoice);
-router.get("/", (req, res) => {
-  req.query.saleType = "purchase";
-  getAllSales(req, res);
-});
-router.get("/:id", getSaleById);
+router.get("/", getAllPurchases);
+router.get("/:id", getPurchaseById);
 router.post("/", createPurchase);
-router.put("/:id", updateSale);
-router.delete("/:id", deleteSale);
+router.put("/:id", updatePurchase);
+router.delete("/:id", deletePurchase);
 
 export default router;

@@ -7,6 +7,7 @@ import {
   deleteProduct,
     updateProductStock,
   bulkUpdateProductStock,
+  getStockReport
 } from "../controllers/productController.js";
 
 const router = express.Router();
@@ -16,6 +17,7 @@ router.get("/:id", getProductById);
 router.post("/", createProduct);
 router.put("/:id", updateProduct);
 router.delete("/:id", deleteProduct);
+router.get("/stock-report", getStockReport);
 
 
 
